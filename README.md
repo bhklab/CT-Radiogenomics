@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project looks focuses on identifying predictors of treatment response by leveraging and integrating various patient data modalities. Specifically, this project focuses on discovering associations between radiomic and genomic features predictive of patient outcomes.
+This project focuses on identifying predictors of treatment response by leveraging and integrating various patient data modalities. Specifically, this project focuses on discovering associations between radiomic and genomic features predictive of patient outcomes.
 
 We integrate two parallel initiatives: **radiomics**, which investigates radiological medical images to identify features that inform patient phenotypic attributes, and **genomics**, where we leverage patient molecular profiles to identify patterns (or "signatures") of gene expression associated with patient outcomes. At its core, this project investigates the association between radiomic features, genomic signatures, and patient outcomes.
 
@@ -37,7 +37,8 @@ Radiogenomics/
 │   ├── Enrichment/          # Gene set enrichment analysis
 │   └── Machine_Learning_Models/  # Predictive modeling
 ├── Preprocessing/           # Data harmonization and quality control
-├── Snakemake/              # Automated workflow management
+├── Snakemake/               # Automated workflow management
+├── Radiomics/               # Radiomics feature extraction (FMCIB)
 ├── Visualization_scripts/   # Results visualization
 └── Old_script_version/     # Legacy code
 ```
@@ -45,13 +46,13 @@ Radiogenomics/
 ## Methodology
 
 ### Data Integration
-- **Radiomic Data**: Quantitative features extracted from medical image segmentation data using pyradiomics from TCIA (The Cancer Imaging Archive)
-- **Genomic Data**: RNA-sequencing data from MSigDB (KEGG, Hallmark, Reactome, and BioCarta databases)
+- **Radiomic Data**: Quantitative features extracted from medical images (CT) using FMCIB (Foundation Model for Cancer Imaging Biomarkers) on pre-cropped inputs described by CSV manifests
+- **Genomic Data**: RNA-sequencing tumor gene expression data (e.g., TCGA/CPTAC via NIH GDC), summarized to pathway-level signatures
 - **Clinical Data**: Treatment information, survival outcomes, and demographic data retrieved from NIH GDC (Genomic Data Commons)
 
 ### Analytical Framework
 1. **Data Harmonization**: Sample identifier standardization and quality control
-2. **Feature Engineering**: GSVA pathway scoring and radiomic feature preprocessing
+2. **Feature Engineering**: GSVA pathway scoring and radiomic feature extraction (FMCIB) and preprocessing
 3. **Association Discovery**: Spearman correlation analysis with FDR correction
 4. **Predictive Modeling**: Cox regression and machine learning approaches
 5. **Clinical Validation**: Survival analysis and outcome associations
@@ -65,14 +66,14 @@ Radiogenomics/
 ## Data Sources
 
 - **The Cancer Genome Atlas (TCGA)**: Multi-cancer genomic data
-- **Clinical Proteomic Tumor Analysis Consortium (CPTAC)**: CPTAC3 study (CCRCC, HNSCC and PDA)
-- **MSigDB (Molecular Signatures Database)**: RNA-sequencing tumour gene expression data
+- **Clinical Proteomic Tumor Analysis Consortium (CPTAC)**: CPTAC3 study (CCRCC, HNSCC, PDA)
+- **MSigDB (Molecular Signatures Database)**: Curated gene set collections used for pathway definitions (KEGG, Hallmark, Reactome, BioCarta)
 - **TCIA (The Cancer Imaging Archive)**: Medical imaging data for radiomic feature extraction
-- **NIH GDC (Genomic Data Commons)**: Clinical data including treatment information and survival outcomes for each cancer type
+- **NIH GDC (Genomic Data Commons)**: Genomic and clinical data including treatment information and survival outcomes
 - **NSCLC Dataset**: Independent radiogenomics non-small cell lung cancer data source
 
 ### Data Processing Tools
-- **Pyradiomics**: Feature extraction from medical image segmentation data for quantitative radiomic analysis
+- **FMCIB**: Feature extraction from pre-cropped CT volumes via `Radiomics/readii-fmcib/run_fmcib.py`
 - **GSVA**: Gene Set Variation Analysis for pathway-level signature generation across KEGG, Hallmark, Reactome, and BioCarta databases
 
 ### Cancer Types
@@ -107,7 +108,7 @@ install.packages(c("data.table", "dplyr", "ggplot2", "pheatmap", "plotly", "heat
 
 ### Python Dependencies
 ```bash
-pip install snakemake
+pip install snakemake click pyyaml
 ```
 
 ## Usage
@@ -120,12 +121,32 @@ pip install snakemake
 
 ### Workflow Execution
 ```bash
-# Run complete pipeline
-snakemake --configfile config.yaml --cores 8
+# Clinical associations (per-dataset)
+snakemake -s Snakemake/clinical_associations/association_snakefile.snakefile \
+	--configfile Snakemake/clinical_associations/clinical_config.yaml \
+	--cores 8
 
-# Run specific analysis
-snakemake --configfile Snakemake/Correlations/correlative_config.yaml
+# Pan-cancer clinical associations
+snakemake -s Snakemake/clinical_associations/pancancer_snakefile.snakefile \
+	--configfile Snakemake/clinical_associations/pancancer_config.yaml \
+	--cores 8
 ```
+
+For other workflows under `Snakemake/` (e.g., Correlations, Enrichment), see the README in each subfolder for the appropriate snakefile and configuration to use.
+
+### Radiomics feature extraction (FMCIB)
+
+See `Radiomics/readii-fmcib/README.md` for full details. Quick start:
+
+```bash
+# From repo root (adjust dataset and paths)
+python Radiomics/readii-fmcib/run_fmcib.py \
+	--config-path Radiomics/readii-fmcib/config/TCIA_CPTAC-CCRCC.yaml \
+	--csv-root srcdata/TCIA_CPTAC-CCRCC/features/fmcib/cube_50_50_50 \
+	--results-root procdata
+```
+
+Inputs default to `srcdata/<dataset>/features/fmcib/cube_50_50_50/*.csv` and outputs to `procdata/<dataset>/fmcib_features/`.
 
 ### Manual Script Execution
 ```bash
@@ -172,66 +193,4 @@ Rscript Visualization_scripts/correlative_heatmaps.R
 3. Commit changes (`git commit -am 'Add new analysis method'`)
 4. Push to branch (`git push origin feature/new-analysis`)
 5. Create Pull Request
-
-
-2. **Clinical Outcome Prediction**: Develop integrated models that predict treatment response and survival outcomes using combined radiomic and genomic data
-
-3. **Biomarker Identification**: Identify specific radiomic-genomic feature pairs that serve as robust predictive biomarkers for clinical decision-making
-
-### Secondary Objectives
-
-1. **Cross-Cancer Validation**: Assess the generalizability of radiogenomic associations across different cancer types and imaging modalities
-
-2. **Mechanistic Understanding**: Investigate the biological pathways that underlie radiogenomic correlations to understand the molecular basis of imaging phenotypes
-
-3. **Clinical Translation**: Develop clinically applicable models and tools that can be integrated into routine oncological practice
-
-## Methodology & Approach
-
-### Multi-Modal Data Integration
-
-Our approach integrates three critical data modalities:
-
-#### 🖼️ **Radiomic Data**
-- **Source**: Quantitative features extracted from medical images (CT, MRI, PET)
-- **Content**: Shape, texture, intensity, and wavelet features characterizing tumor regions
-- **Processing**: Feature standardization, correlation filtering, and quality control
-
-#### 🧬 **Genomic Data**
-- **Source**: RNA-sequencing data from tumor samples
-- **Content**: Gene expression profiles transformed into pathway-level signatures
-- **Processing**: Differential expression analysis, pathway enrichment scoring, and signature generation
-
-#### 🏥 **Clinical Data**
-- **Source**: Curated clincal data from trial patients
-- **Content**: Treatment information, survival outcomes, demographic data
-- **Processing**: Outcome harmonization, treatment filtering, and survival analysis preparation
-
-### Analytical Framework
-
-#### 1. **Data Harmonization**
-- Sample identifier standardization across modalities
-- Quality control and missing data handling
-- Multi-institutional data integration protocols
-
-#### 2. **Feature Filtering**
-- Pathway-level gene expression signature generation using GSVA (Gene Set Variation Analysis)
-- Radiomic feature preprocessing and correlation-based filtering
-- Clinical outcome variable preparation for survival analysis
-
-#### 3. **Association Analysis**
-- Spearman correlation analysis between radiomic features and genomic signatures
-- Multiple testing correction using False Discovery Rate (FDR)
-- Clinical relevance filtering based on outcome associations
-
-#### 4. **Predictive Modeling**
-- Cox proportional hazards models for survival analysis
-- Machine learning approaches (LASSO, Ridge, Elastic Net) for feature selection
-- Cross-validation and performance assessment
-
-#### 5. **Clinical Validation**
-- Survival analysis integration throughout the pipeline
-- Clinical metadata incorporation for biomarker validation
-- Treatment-specific outcome associations
-
-**Last Updated**: July 2025
+**Last Updated**: October 2025
