@@ -1,4 +1,4 @@
-SAMPLES: KIRC,HNSCC,PDA,CCRCC,NSCLC
+SAMPLES: KIRC,HNSCC,PDA,CCRCC #,NSCLC
 datasets:
   NSCLC: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/NSCLC_filtered_TPM.csv"
   HNSCC: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/HNSCC_filtered_TPM.csv"

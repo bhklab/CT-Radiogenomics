@@ -5,14 +5,14 @@ SAMPLES = config.get("SAMPLES", "").split(",") if config.get("SAMPLES") else []
 
 rule all:
     input:
-        expand("/cluster/projects/bhklab/procdata/Radiogenomics/outputs/Hallmark_scores/{sample}_hallmark_signatures.csv", sample=SAMPLES),
+        expand("/cluster/projects/bhklab/procdata/Radiogenomics/genomics/gene_signatures/v2/{sample}_hallmark_signatures.csv", sample=SAMPLES),
 
 rule filter_patients:
     input:
         dataset=lambda wildcards: config["datasets"][wildcards.sample],
         ids=lambda wildcards: config["patient_ids"][wildcards.sample]
     output:
-        "/cluster/projects/bhklab/procdata/Radiogenomics/outputs/filtered_RNAseq/{sample}_filtered.csv"
+        "/cluster/projects/bhklab/procdata/Radiogenomics/genomics/patient_ids/{sample}_filtered.csv"
     resources:
         mem_mb=2000,
         runtime=30
@@ -24,10 +24,10 @@ rule filter_patients:
 
 rule hallmark_signature_extraction:
     input:
-        dataset="/cluster/projects/bhklab/procdata/Radiogenomics/outputs/filtered_RNAseq/{sample}_filtered.csv",
+        dataset="/cluster/projects/bhklab/procdata/Radiogenomics/genomics/patient_ids/{sample}_filtered.csv",
         gmt=lambda wildcards: config["hallmark_gmt"]
     output:
-        "/cluster/projects/bhklab/procdata/Radiogenomics/outputs/Hallmark_scores/{sample}_hallmark_signatures.csv"
+        "/cluster/projects/bhklab/procdata/Radiogenomics/genomics/gene_signatures/v2/{sample}_hallmark_signatures.csv"
     resources:
         mem_mb=8000,
         runtime=120
