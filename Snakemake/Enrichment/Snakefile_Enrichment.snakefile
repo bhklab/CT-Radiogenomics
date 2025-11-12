@@ -5,7 +5,7 @@ SAMPLES = config.get("SAMPLES", "").split(",") if config.get("SAMPLES") else []
 
 rule all:
     input:
-        expand("/cluster/projects/bhklab/procdata/Radiogenomics/genomics/gene_signatures/v2/{sample}_hallmark_signatures.csv", sample=SAMPLES),
+        expand("/cluster/projects/bhklab/procdata/Radiogenomics/genomics/gene_signatures/v2/{sample}_hallmark_signatures.csv", sample=SAMPLES)
 
 rule filter_patients:
     input:
@@ -19,7 +19,7 @@ rule filter_patients:
     shell:
         """
         module load R
-        Rscript /cluster/home/t138199uhn/Scripts/Data_sampler.R {input.dataset} {input.ids} {output}
+        Rscript /cluster/home/t138199uhn/Scripts/genomics/preprocessing/Data_sampler.R {input.dataset} {input.ids} {output}
         """
 
 rule hallmark_signature_extraction:
@@ -34,7 +34,6 @@ rule hallmark_signature_extraction:
     shell:
         """
         module load R
-        Rscript /cluster/home/t138199uhn/Scripts/hallmark_enrichment_GMT.R {input.dataset} {input.gmt} {output}
+        Rscript /cluster/home/t138199uhn/Scripts/genomics/enrichment/hallmark_enrichment_GMT.R {input.dataset} {input.gmt} {output}
         """
-
 

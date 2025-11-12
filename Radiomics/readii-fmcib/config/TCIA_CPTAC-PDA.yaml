@@ -14,7 +14,7 @@ modalities: "CT,RTSTRUCT"
 
 # READII arguments
 # Region of image to apply negative control strategy to
-negative_control_regions: ["full", "roi"]
+negative_control_regions: ["full", "roi", "non_roi"]
 # Which negative control strategies to apply
 negative_control_types: ["shuffled", "randomized", "randomized_sampled"]
 

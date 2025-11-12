@@ -18,4 +18,4 @@ echo Processing $DISEASE_REGION/$DATA_SOURCE\_$DATASET
 
 cd /cluster/home/$USERNAME/projects/readii_2_roqc
 
-pixi run readii_negative $DATASET false true 60
+pixi run readii_negative $DATASET false true 10

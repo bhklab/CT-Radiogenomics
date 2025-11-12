@@ -25,7 +25,7 @@
 #   - Used for identifying highly correlated pathway clusters
 #
 # Analysis Method:
-#   - Uses Spearman rank correlation (robust to outliers)
+#   - Uses Spearman rank correlation 
 #   - Computes pairwise complete observations
 #   - Handles missing data appropriately
 #   - Results used downstream for feature filtering
