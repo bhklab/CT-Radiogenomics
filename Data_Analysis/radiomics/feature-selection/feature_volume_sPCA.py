@@ -35,7 +35,6 @@ def parse_args() -> argparse.Namespace:
 	p.add_argument("--var-bottom-perc", type=float, default=0.15, help="Drop bottom percentile of variance (0-1 or 0-100) [default: %(default)s]")
 	p.add_argument("--abs-corr-threshold", type=float, default=0.30, help="Drop features with |Spearman rho| > threshold vs volume [default: %(default)s]")
 	p.add_argument("--min-cumvar", type=float, default=0.95, help="Cumulative variance target for PCA components [default: %(default)s]")
-	p.add_argument("--top-perc", type=float, default=0.20, help="Top percentage of features to select by weighted score (0-1 or 0-100) [default: %(default)s]")
 	return p.parse_args()
 
 
@@ -93,14 +92,10 @@ def main() -> int:
 	keep_cols = ([ID_COL] if ID_COL in sub.columns else []) + feat_cols
 	sub = sub.loc[:, keep_cols]
 
-	# Numeric conversion and validation for feature columns
+	# Numeric conversion for feature columns (allow NaNs here; will handle later via missing filter)
 	sub[feat_cols] = sub[feat_cols].apply(pd.to_numeric, errors="coerce")
-	X = sub[feat_cols].to_numpy(dtype=float)
-	if not np.isfinite(X).all():
-		n_nan = int(np.isnan(X).sum())
-		n_inf = int(np.isinf(X).sum())
-		print(f"ERROR: Non-finite values detected after numeric conversion (NaN={n_nan}, Inf={n_inf}).", file=sys.stderr)
-		return 4
+	# Replace infinities with NaN to be handled by missing filter
+	sub[feat_cols] = sub[feat_cols].replace([np.inf, -np.inf], np.nan)
 
 	out_csv = os.path.join(args.outdir, f"{stem_from_path(args.input)}_original_full_features_only.csv")
 	sub.to_csv(out_csv, index=False)
@@ -117,23 +112,24 @@ def main() -> int:
 		print(f"ERROR: Failed to read volume CSV: {e}", file=sys.stderr)
 		return 5
 
-	# Build SampleID -> volume Series
-	if 'SampleID' in vdf.columns:
-		sid_series = vdf['SampleID'].astype(str).str.strip()
-	elif 'Filepath' in vdf.columns:
-		# Infer SampleID from first non-empty path component
-		def _infer_sid(p: str) -> str:
-			parts = str(p).strip().split('/')
-			for comp in parts:
-				if comp:
-					return comp.split('.')[0].split('_')[0]
-			return str(p).strip()
-		sid_series = vdf['Filepath'].astype(str).map(_infer_sid)
+	# Build SampleID -> volume Series (mirror logic from feature_volume_corr.py)
+	# 1) Detect filepath-like column or use explicit SampleID
+	filepath_cols = [c for c in vdf.columns if c.lower() in ("filepath", "file", "path", "filename")]
+	if ID_COL in vdf.columns:
+		sid_series = vdf[ID_COL].astype(str).str.strip()
+	elif 'Filepath' in vdf.columns or filepath_cols:
+		fp_col = 'Filepath' if 'Filepath' in vdf.columns else filepath_cols[0]
+		def _extract_sid(p: str) -> str:
+			# SampleID is everything before the first '/'; preserves underscores like C3L-00610_0000
+			p = str(p).strip()
+			idx = p.find('/')
+			return p if idx == -1 else p[:idx]
+		sid_series = vdf[fp_col].astype(str).map(_extract_sid)
 	else:
-		print("ERROR: Volume CSV must contain 'SampleID' or 'Filepath' column.", file=sys.stderr)
+		print("ERROR: Volume CSV must contain 'SampleID' or a filepath-like column (e.g., 'Filepath' or 'filepath').", file=sys.stderr)
 		return 5
 
-	# Accept either 'sum' or 'original_shape_VoxelVolume' as the volume column
+	# 2) Choose volume column and coerce to numeric
 	if 'sum' in vdf.columns:
 		vol_col = 'sum'
 	elif 'original_shape_VoxelVolume' in vdf.columns:
@@ -144,10 +140,23 @@ def main() -> int:
 
 	vdf = vdf.copy()
 	vdf['__SID__'] = sid_series
-	# Optional modality filter if present
-	if 'Modality' in vdf.columns:
-		vdf = vdf[vdf['Modality'].isin(['RTSTRUCT', 'SEG'])]
-	vol_series = vdf.groupby('__SID__')[vol_col].max()
+	vdf[vol_col] = pd.to_numeric(vdf[vol_col], errors='coerce')
+	vdf[vol_col] = vdf[vol_col].replace([np.inf, -np.inf], np.nan)
+
+	# 3) Optional modality filter (case-insensitive) to RTSTRUCT/SEG
+	# Only consider columns named exactly 'Modality_Mask' or 'Modality'
+	modality_col = None
+	if 'Modality_Mask' in vdf.columns:
+		modality_col = 'Modality_Mask'
+	elif 'Modality' in vdf.columns:
+		modality_col = 'Modality'
+	if modality_col is not None:
+		vdf[modality_col] = vdf[modality_col].astype(str).str.strip().str.upper()
+		vdf = vdf[vdf[modality_col].isin(['RTSTRUCT', 'SEG'])]
+
+	# 4) Drop rows with invalid volume and aggregate by sample (max)
+	vdf = vdf.dropna(subset=[vol_col])
+	vol_series = vdf.groupby('__SID__', as_index=True)[vol_col].max()
 
 	# Align volume to filtered features
 	merged = sub.merge(vol_series.rename('volume'), left_on=ID_COL, right_index=True, how='left')
@@ -269,19 +278,8 @@ def main() -> int:
 	out_scores_ranked = os.path.join(args.outdir, f"{base}_feature_scores_ranked.csv")
 	score_df.to_csv(out_scores_ranked, index=False)
 
-	# Step 11: Select top 20% by score
-	perc = float(args.top_perc)
-	perc = perc/100.0 if perc > 1.0 else perc
-	top_k = max(1, int(round(perc * score_df.shape[0])))
-	selected = score_df.head(top_k).copy()
-	out_selected_list = os.path.join(args.outdir, f"{base}_selected_features.txt")
-	with open(out_selected_list, 'w') as f:
-		for feat in selected['feature'].tolist():
-			f.write(f"{feat}\n")
-	# Also write selected feature matrix for convenience
-	selected_matrix = pd.concat([merged[[ID_COL]].reset_index(drop=True), feat_df[selected['feature']].reset_index(drop=True)], axis=1)
-	out_selected_matrix = os.path.join(args.outdir, f"{base}_selected_original_features.csv")
-	selected_matrix.to_csv(out_selected_matrix, index=False)
+	# Step 11 (disabled): No top-percent cutoff; output full ranking only
+	# If needed later, selection can be re-enabled to write a feature list/matrix.
 
 	print("Done.")
 	print(f"- Filtered matrix:         {out_csv}")
@@ -290,8 +288,7 @@ def main() -> int:
 	print(f"- SparsePCA scores:        {out_scores}")
 	print(f"- SparsePCA loadings:      {out_loadings}")
 	print(f"- Ranked feature scores:   {out_scores_ranked}")
-	print(f"- Selected features (top {perc*100:.1f}%): {out_selected_list}")
-	print(f"- Selected feature matrix: {out_selected_matrix}")
+	print(f"- Selected features:       (disabled) full ranking written instead")
 	return 0
 
 
