@@ -100,20 +100,31 @@ def stem_from_path(path: str) -> str:
 
 def read_and_filter(input_csv: str, feature_prefix: str) -> Tuple[pd.DataFrame, List[str]]:
     df = pd.read_csv(input_csv)
-    for c in (ID_COL, PERM_COL, REGION_COL):
-        if c not in df.columns:
-            raise ValueError(f"Missing required column: {c}")
-    perm = df[PERM_COL].astype(str).str.strip().str.lower()
-    region = df[REGION_COL].astype(str).str.strip().str.lower()
-    sub = df.loc[(perm == "original") & (region == "full")].copy()
-    if sub.empty:
-        raise ValueError("No rows after filtering for original/full.")
-    feat_cols = [c for c in sub.columns if c.startswith(feature_prefix)]
-    if not feat_cols:
-        raise ValueError(f"No feature columns starting with '{feature_prefix}' after filtering.")
-    keep_cols = ([ID_COL] if ID_COL in sub.columns else []) + feat_cols
-    sub = sub.loc[:, keep_cols]
-    # Numeric coercion and inf->NaN
+    has_perm_region = (PERM_COL in df.columns) and (REGION_COL in df.columns)
+
+    if has_perm_region:
+        perm = df[PERM_COL].astype(str).str.strip().str.lower()
+        region = df[REGION_COL].astype(str).str.strip().str.lower()
+        sub = df.loc[(perm == "original") & (region == "full")].copy()
+        if sub.empty:
+            raise ValueError("No rows after filtering for original/full.")
+        feat_cols = [c for c in sub.columns if c.startswith(feature_prefix)]
+        if not feat_cols:
+            raise ValueError(f"No feature columns starting with '{feature_prefix}' after filtering.")
+        keep_cols = ([ID_COL] if ID_COL in sub.columns else []) + feat_cols
+        sub = sub.loc[:, keep_cols]
+    else:
+        # Accept already-filtered matrices that only contain SampleID + pred_* columns
+        feat_cols = [c for c in df.columns if c.startswith(feature_prefix)]
+        if not feat_cols:
+            raise ValueError(
+                f"No feature columns starting with '{feature_prefix}' found. "
+                "Expected either raw input with readii_Permutation/readii_Region or a cleaned matrix with pred_* columns."
+            )
+        keep_cols = ([ID_COL] if ID_COL in df.columns else []) + feat_cols
+        sub = df.loc[:, keep_cols].copy()
+
+    # Numeric coercion and inf->NaN on feature columns
     sub[feat_cols] = sub[feat_cols].apply(pd.to_numeric, errors="coerce")
     sub[feat_cols] = sub[feat_cols].replace([np.inf, -np.inf], np.nan)
     return sub, feat_cols

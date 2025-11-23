@@ -2,195 +2,146 @@
 
 ## Overview
 
-This project focuses on identifying predictors of treatment response by leveraging and integrating various patient data modalities. Specifically, this project focuses on discovering associations between radiomic and genomic features predictive of patient outcomes.
+This repository contains an end-to-end pipeline to discover, visualize, and validate associations between quantitative imaging features (radiomics) and molecular profiles (genomics) across cancer types. It provides:
 
-We integrate two parallel initiatives: **radiomics**, which investigates radiological medical images to identify features that inform patient phenotypic attributes, and **genomics**, where we leverage patient molecular profiles to identify patterns (or "signatures") of gene expression associated with patient outcomes. At its core, this project investigates the association between radiomic features, genomic signatures, and patient outcomes.
+- Radiomics feature processing and feature-level clustering to select compact “medoid” feature sets
+- Dimensionality reduction utilities for fast 2D/3D visualization (PCA, t-SNE, UMAP)
+- Radiogenomic correlation analysis (Spearman and Pearson) with ID harmonization
+- Survival modeling and enrichment analyses (legacy/optional; see project pivot below)
 
-## Research Hypothesis
+## Research hypothesis
 
-**Quantitative imaging features (radiomics) correlate with underlying genomic signatures, and these correlations can predict patient treatment response and survival outcomes.**
+Quantitative imaging features capture phenotypes driven by underlying molecular programs. Therefore, radiomic features should correlate with genomic pathway signatures. Note: clinical prediction (treatment response/survival) was investigated initially but is currently de‑emphasized after weak associations were observed (see pivot).
 
-This hypothesis is based on the understanding that:
-1. Radiomic features capture tumor phenotypes resulting from underlying molecular processes
-2. Gene expression patterns influence cellular behavior visible in imaging
-3. Combined radiomic and genomic information provides more robust predictive models
+## Project history and pivot
 
-## Objectives
+- Original aim: evaluate whether radiomic features can serve as surrogate predictive markers for cancer diagnosis and survival outcomes, and whether radiomics/genomics complement each other for clinical prediction.
+- Findings: across explored cohorts, associations between (i) radiomics and genomics, and (ii) either modality and clinical outcomes, were weak.
+- Pivot: narrow the scope to characterizing radiomic–genomic relationships only, with emphasis on pathway-level signatures (MSigDB Hallmarks), and drop clinical analyses from the main line of inquiry.
+- Feature extraction change: moved from hand-crafted PyRadiomics to deep learning features using FMCIB (Foundation Model for Cancer Imaging Biomarkers). Current analyses center on these deep features.
 
-### Primary Objectives
-- **Discover Radiogenomic Associations**: Identify significant correlations between quantitative imaging features and genomic pathway signatures across cancer types
-- **Clinical Outcome Prediction**: Develop integrated models predicting treatment response and survival outcomes
-- **Biomarker Identification**: Identify radiomic-genomic feature pairs serving as predictive biomarkers
+### Current objectives
 
-### Secondary Objectives
-- **Cross-Cancer Validation**: Assess generalizability across cancer types and imaging modalities
-- **Mechanistic Understanding**: Investigate biological pathways underlying radiogenomic correlations
-- **Clinical Translation**: Develop clinically applicable models for routine oncological practice
+- Identify robust, reproducible associations between deep learning FMCIB radiomic features and Hallmarks-of-cancer gene signatures.
+- Reduce radiomic feature redundancy via spectral clustering and medoid selection to improve interpretability.
+- Characterize cross-cohort consistency (e.g., NSCLC and CPTAC cohorts) of radiogenomic signals.
 
-## Pipeline Architecture
+## Repository organization
 
 ```
 Radiogenomics/
-├── Data_Analysis/           # Core analytical scripts
-│   ├── Correlations/        # Radiogenomic correlation analysis
-│   ├── CoxPH_models/        # Survival analysis models
-│   ├── Enrichment/          # Gene set enrichment analysis
-│   └── Machine_Learning_Models/  # Predictive modeling
-├── Preprocessing/           # Data harmonization and quality control
-├── Snakemake/               # Automated workflow management
-├── Radiomics/               # Radiomics feature extraction (FMCIB)
-├── Visualization_scripts/   # Results visualization
-└── Old_script_version/     # Legacy code
+├── Data_Analysis/                           # Analysis notebooks, scripts and helper utilities
+│   ├── Correlations/                        # Radiogenomic correlation & selection pipelines
+│   │   ├── LASSO_corr.py                    # Per-signature LASSO -> test-set Spearman correlations + heatmaps
+│   │   ├── PCA_correlation.py               # PCA -> correlation pipeline (PCA selection + correlations/heatmaps)
+│   │   ├── lasso_per_signature.py           # helpers to run per-signature LASSO jobs
+│   │   ├── radiogenomic_correlation.py      # Multi-task LASSO & correlation pipeline (residualization, variance filtering)
+│   │   └── radiomics_self_correlation.R     # small R utilities for radiomics self-correlation
+│   ├── Machine_Learning_Models/             # Linear/LASSO/Ridge/Elastic Net models (R implementations)
+│   ├── Enrichment/                          # Pathway/gene set enrichment (R scripts)
+│   ├── radiomics/                           # radiomics analysis helpers and feature-selection kernels
+│   │   └── feature-selection/
+│   │       ├── spectral_cluster.py
+│   │       ├── hierarchical_medoid_clustering.py
+│   │       ├── feature_PCA.py
+│   │       ├── feature_vif_pca.py
+│   │       ├── feature_volume_corr.py
+│   │       └── feature_volume_sPCA.py
+│   ├── misc_tasks.ipynb                     # utility notebook: heatmaps, PCA plotting, LASSO presence scans
+│   └── README.md
+├── Preprocessing/                           # Data harmonization & preprocessing scripts
+│   ├── extract_tpm_by_symbols.py
+│   ├── Data_sampler.R
+│   └── archived/                            # older preprocessing scripts
+├── Radiomics/                               # FMCIB feature extraction + run scripts and configs
+│   ├── readii-fmcib/
+	│   ├── run_fmcib.py
+	│   └── config/                          # per-dataset FMCIB configs (TCIA, CPTAC, etc.)
+│   ├── readii_2_roqc/
+│   └── bash_scripts/                        # dataset-specific run scripts
+├── Snakemake/                               # Workflow definitions and Snakefiles (Correlations, Enrichment, Clinical)
+│   ├── Correlations/
+│   ├── Enrichment/
+│   └── clinical_associations/
+├── Old_script_version/                      # legacy scripts kept for reference (includes older visualization kernels)
+│   └── Visualization_scripts/
+│       ├── UMAP_cancer.R
+│       ├── clinical_correlation_viz.R
+│       ├── correlative_heatmaps.R
+│       └── signature_distribution.R
+└── data/                                    # Raw and processed data (see data/procdata and data/rawdata)
 ```
 
-## Methodology
+If a folder has its own README, start there for details (e.g., Data_Analysis/Enrichment, Machine_Learning_Models).
 
-### Data Integration
-- **Radiomic Data**: Quantitative features extracted from medical images (CT) using FMCIB (Foundation Model for Cancer Imaging Biomarkers) on pre-cropped inputs described by CSV manifests
-- **Genomic Data**: RNA-sequencing tumor gene expression data (e.g., TCGA/CPTAC via NIH GDC), summarized to pathway-level signatures
-- **Clinical Data**: Treatment information, survival outcomes, and demographic data retrieved from NIH GDC (Genomic Data Commons)
+## Data modalities and conventions
 
-### Analytical Framework
-1. **Data Harmonization**: Sample identifier standardization and quality control
-2. **Feature Engineering**: GSVA pathway scoring and radiomic feature extraction (FMCIB) and preprocessing
-3. **Association Discovery**: Spearman correlation analysis with FDR correction
-4. **Predictive Modeling**: Cox regression and machine learning approaches
-5. **Clinical Validation**: Survival analysis and outcome associations
+- Radiomics (current): deep learning features from FMCIB (columns prefixed with `pred_`), with `SampleID` formatted like `R01-###_####` where the suffix identifies an instance/region.
+- Radiomics (historical): traditional PyRadiomics features were evaluated earlier but are not the current focus.
+- Genomics: gene signatures (e.g., MSigDB Hallmarks) with samples as rows indexed by base IDs (e.g., `R01-###`).
+- Clinical: outcomes and covariates for survival analyses.
 
-### Key Methods
-- **Pathway Analysis**: KEGG, Hallmark, Reactome, BioCarta databases
-- **Correlation Analysis**: Spearman correlations between radiomic and genomic features
-- **Survival Modeling**: Cox proportional hazards regression
-- **Machine Learning**: LASSO, Ridge, Elastic Net regression with cross-validation
-
-## Data Sources
-
-- **The Cancer Genome Atlas (TCGA)**: Multi-cancer genomic data
-- **Clinical Proteomic Tumor Analysis Consortium (CPTAC)**: CPTAC3 study (CCRCC, HNSCC, PDA)
-- **MSigDB (Molecular Signatures Database)**: Curated gene set collections used for pathway definitions (KEGG, Hallmark, Reactome, BioCarta)
-- **TCIA (The Cancer Imaging Archive)**: Medical imaging data for radiomic feature extraction
-- **NIH GDC (Genomic Data Commons)**: Genomic and clinical data including treatment information and survival outcomes
-- **NSCLC Dataset**: Independent radiogenomics non-small cell lung cancer data source
-
-### Data Processing Tools
-- **FMCIB**: Feature extraction from pre-cropped CT volumes via `Radiomics/readii-fmcib/run_fmcib.py`
-- **GSVA**: Gene Set Variation Analysis for pathway-level signature generation across KEGG, Hallmark, Reactome, and BioCarta databases
-
-### Cancer Types
-- **CCRCC**: Clear Cell Renal Cell Carcinoma
-- **PDA**: Pancreatic Ductal Adenocarcinoma
-- **HNSCC**: Head and Neck Squamous Cell Carcinoma
-- **BRCA**: Breast Invasive Carcinoma
-- **LGG**: Brain Lower Grade Glioma
-- **GBM**: Glioblastoma Multiforme
-- **KIRC**: Kidney Renal Clear Cell Carcinoma
-- **NSCLC**: Non-Small Cell Lung Cancer (independent data source)
+Best-practice conventions:
+- Keep radiomics rows filtered to permutation == original and region == full (where applicable).
+- Use standardized feature matrices for downstream correlation to reduce redundancy.
+- Maintain consistent sample ID schemes across modalities; derive base IDs by stripping the trailing `_####` from `SampleID` when aligning to genomics.
 
 ## Installation
 
-### Prerequisites
-- R ≥ 4.0 with bioinformatics packages
-- Python ≥ 3.8 with Snakemake
-- Sufficient computational resources for large-scale analysis
+You can use any Python 3.9+ environment and R ≥ 4.0. A minimal Python stack is listed below.
 
-### R Dependencies
-```r
-# Bioinformatics packages
-install.packages("BiocManager")
-BiocManager::install(c("DESeq2", "GSVA", "biomaRt", "org.Hs.eg.db"))
+### R packages (typical)
+- Bioconductor core: DESeq2, GSVA, biomaRt, org.Hs.eg.db
+- Stats/ML: survival, survminer, glmnet, caret
+- Viz: ggplot2, pheatmap, plotly, heatmaply
 
-# Statistical and ML packages
-install.packages(c("survival", "survminer", "glmnet", "caret"))
+### Python packages (typical)
+- numpy, pandas, scipy
+- scikit-learn
+- matplotlib, seaborn
+- umap-learn (only for UMAP plots)
+- snakemake (if running workflows)
 
-# Data manipulation and visualization
-install.packages(c("data.table", "dplyr", "ggplot2", "pheatmap", "plotly", "heatmaply"))
-```
 
-### Python Dependencies
-```bash
-pip install snakemake click pyyaml
-```
+## Datasets and signatures
 
-## Usage
+- Datasets: CPTAC-CCRCC, CPTAC-PDA, CPTAC-HNSCC, TCGA-KIRC, NSCLC-Radiogenomics, OCTANE
+- Gene signatures: MSigDB Hallmarks (CSV matrices with samples as rows and signatures as columns). Example files live under `data/procdata/gene_signatures/`.
 
-### Quick Start
-1. **Organize Data**: Place genomic, radiomic, and clinical data in appropriate directories
-2. **Configure Paths**: Update file paths in configuration files
-3. **Run Pipeline**: Execute Snakemake workflows for automated analysis
-4. **Explore Results**: Use visualization scripts to interpret findings
+Data syncing and curation are environment-specific. Keep signature matrices and radiomics matrices versioned and documented.
 
-### Workflow Execution
-```bash
-# Clinical associations (per-dataset)
-snakemake -s Snakemake/clinical_associations/association_snakefile.snakefile \
-	--configfile Snakemake/clinical_associations/clinical_config.yaml \
-	--cores 8
+## Best practices
 
-# Pan-cancer clinical associations
-snakemake -s Snakemake/clinical_associations/pancancer_snakefile.snakefile \
-	--configfile Snakemake/clinical_associations/pancancer_config.yaml \
-	--cores 8
-```
+- Reproducibility: set seeds (e.g., `--seed 10`) and record package versions.
+- ID hygiene: consistently maintain `R01-###_####` for radiomics and base IDs `R01-###` for genomics.
+- Scaling: visualization utilities standardize features; avoid re-scaling inputs twice.
+- Missing data: numeric coercion + median imputation is applied in visualization and clustering steps; for correlations, pairwise NaNs are skipped.
+- Plots at scale: t-SNE perplexity must be < number of observations; the script will auto-adjust when needed.
+- Storage: keep derived matrices (standardized, medoid) alongside cluster assignments to ease reproducibility.
 
-For other workflows under `Snakemake/` (e.g., Correlations, Enrichment), see the README in each subfolder for the appropriate snakefile and configuration to use.
+## Legacy components
 
-### Radiomics feature extraction (FMCIB)
+These parts of the repo reflect the original broader scope and are kept for reference:
 
-See `Radiomics/readii-fmcib/README.md` for full details. Quick start:
+- `Data_Analysis/CoxPH_models`, `Snakemake/clinical_associations`: clinical outcome modeling and workflows.
+- `Old_script_version/` and `Preprocessing/archived/`: earlier enrichment and clinical preprocessing utilities.
+- PyRadiomics-derived feature scripts/outputs (historical); current analyses prioritize FMCIB deep features.
 
-```bash
-# From repo root (adjust dataset and paths)
-python Radiomics/readii-fmcib/run_fmcib.py \
-	--config-path Radiomics/readii-fmcib/config/TCIA_CPTAC-CCRCC.yaml \
-	--csv-root srcdata/TCIA_CPTAC-CCRCC/features/fmcib/cube_50_50_50 \
-	--results-root procdata
-```
+## File formats
 
-Inputs default to `srcdata/<dataset>/features/fmcib/cube_50_50_50/*.csv` and outputs to `procdata/<dataset>/fmcib_features/`.
+Inputs
+- Genomics: CSV, samples as rows (index), signatures as columns
+- Radiomics: CSV, rows=samples with `SampleID` and `pred_*` columns
+- Clinical: CSV/TSV with outcomes and covariates
 
-### Manual Script Execution
-```bash
-# Preprocessing
-Rscript Preprocessing/unique_ID_generator.R [args]
-
-# Analysis
-Rscript Data_Analysis/Correlations/correlative_analysis.R [args]
-
-# Visualization
-Rscript Visualization_scripts/correlative_heatmaps.R
-```
-
-## Output
-
-### Analysis Results
-- Correlation matrices between radiomic and genomic features
-- Statistical significance testing with multiple comparison correction
-- Survival analysis results and hazard ratios
-- Machine learning model performance metrics
-
-### Visualizations
-- Interactive and static heatmaps of radiogenomic correlations
-- Survival curves and forest plots
-- Feature importance and correlation networks
-- Clinical outcome associations
-
-## File Formats
-
-### Input Data
-- **Genomic**: CSV files with samples as rows, genes as columns
-- **Radiomic**: CSV files with samples as rows, features as columns
-- **Clinical**: CSV/TSV files with patient metadata and outcomes
-
-### Output Data
-- **Correlations**: CSV matrices with correlation coefficients and p-values
-- **Models**: RData objects containing fitted models
-- **Visualizations**: PNG/HTML files with plots and interactive elements
+Outputs
+- Correlations: CSV matrices and PNG heatmaps
+- Clustering: cluster assignments, Gap-statistic tables, spectral/t-SNE embeddings, medoid matrices
+- Models: RData objects and figures
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/new-analysis`)
-3. Commit changes (`git commit -am 'Add new analysis method'`)
-4. Push to branch (`git push origin feature/new-analysis`)
-5. Create Pull Request
-**Last Updated**: October 2025
+1) Fork → 2) Branch → 3) Commit → 4) Push → 5) PR
+—
+
+Last updated: November 2025
