@@ -12,6 +12,7 @@
 *.html
 *.venv
 *.bed9
+.DS_Store
 # (add uppercase variants if needed)
 *.[Cc][Ss][Vv]
 *.[Tt][Ss][Vv]
