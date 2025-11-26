@@ -13,6 +13,6 @@ patient_ids:
   PDA: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/CPTAC_PDA_patientids.txt"
   CCRCC: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/CPTAC_CCRCC_patientids.txt"
   KIRC: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/TCGA_KIRC_patientids.txt"
-  OCTANE: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/PMCC_OCTANE_patientids.txt"
+  OCTANE: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/OCTANE_patientids.txt"
 # Add GMT file paths for each gene set collection
 hallmark_gmt: "/cluster/projects/bhklab/rawdata/Radiogenomics/gmt/h.all.v2025.1.Hs.symbols.gmt"

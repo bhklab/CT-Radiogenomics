@@ -25,7 +25,7 @@ import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import MultiTaskLassoCV, MultiTaskLasso
 from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, SparsePCA
 from sklearn.linear_model import LinearRegression
 from scipy.stats import spearmanr, pearsonr
 
@@ -48,6 +48,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--id-suffix-regex", default=r"_(\d{4})$")
     p.add_argument("--duplicate-handling", choices=["keep-first","keep-all","mean","median"], default="keep-all")
     p.add_argument("--compute-pvals", action="store_true", help="Compute Spearman correlation p-values and FDR-adjusted q-values on test set")
+    p.add_argument("--sparse-pca", action="store_true", help="Use SparsePCA for the final dimensionality reduction (fit_transform). k is still chosen by dense PCA to reach 95% cumulative variance")
+    p.add_argument("--sparse-alpha", type=float, default=1.0, help="Alpha (sparsity) parameter for SparsePCA; larger => sparser components")
     return p.parse_args()
 
 def ensure_outdir(path: str):
@@ -269,77 +271,82 @@ def plot_heatmap(corr_df: pd.DataFrame, out_png: str, cluster: str="both"):
 # Main workflow
 # -----------------------------
 def main():
+    """Simplified workflow: read harmonized radiomics and genomics matrices,
+    perform variance filtering on radiomics, compute PCA on radiomics to cover
+    95% cumulative variance, project radiomics to PCs, then compute Pearson
+    and Spearman correlations between PCs and genomic signatures.
+    """
     args = parse_args()
     ensure_outdir(args.outdir)
     base = args.name or f"{os.path.splitext(os.path.basename(args.radiomics))[0]}__x__{os.path.splitext(os.path.basename(args.genomics))[0]}"
 
-    # Load / align
-    # Keep all radiomics rows (do not drop duplicates) to preserve original patch-level rows
-    rad_df, rad_map = load_radiomics(args.radiomics, args.id_suffix_regex, duplicate_handling='keep-all')
-    geno = load_genomics(args.genomics)
+    # Load harmonized matrices directly (expects samples as index)
+    rad_path = args.radiomics
+    geno_path = args.genomics
+    print(f"Loading radiomics from: {rad_path}")
+    X_rad = pd.read_csv(rad_path, index_col=0)
+    # If SampleID column present instead, use it
+    if 'SampleID' in X_rad.columns:
+        X_rad.index = X_rad['SampleID'].astype(str).str.strip()
+        X_rad = X_rad.drop(columns=['SampleID'])
+    print(f"Loaded radiomics matrix: {X_rad.shape[0]} samples x {X_rad.shape[1]} columns")
 
-    # Identify base IDs present in genomics
-    geno_bases = set(geno.index.astype(str))
-    rad_bases = set(rad_map['base_id'].astype(str))
-    missing_bases = sorted(rad_bases - geno_bases)
-    if missing_bases:
-        # Drop all radiomics rows whose base_id is not present in genomics
-        drop_mask = rad_map['base_id'].astype(str).isin(missing_bases)
-        drop_full_ids = rad_map.loc[drop_mask, 'full_id'].astype(str).tolist()
-        rad_map = rad_map.loc[~drop_mask].copy()
-        rad_df = rad_df.loc[rad_map['full_id']].copy()
-        # Save list of dropped radiomics full_ids for traceability
-        drop_path = os.path.join(args.outdir, f"{base}_dropped_radiomics_missing_genomics_full_ids.csv")
-        pd.DataFrame({'full_id': drop_full_ids, 'base_id': [s.split('_')[0] if '_' in s else s for s in drop_full_ids]}).to_csv(drop_path, index=False)
-        print(f"[info] Dropped {len(drop_full_ids)} radiomics rows belonging to {len(missing_bases)} missing base_ids; list saved to {drop_path}")
+    print(f"Loading genomics from: {geno_path}")
+    geno = load_genomics(geno_path)
+    print(f"Loaded genomics matrix: {geno.shape[0]} samples x {geno.shape[1]} signatures")
 
-    # Now expand genomics to radiomics full_ids using the filtered rad_map
-    G_exp = expand_genomics_to_radiomics(geno, rad_map)
-    rad_aln, gen_aln = align_on_full_ids(rad_df, G_exp)
-    print(f"Aligned radiomics: {rad_aln.shape} | Genomics: {gen_aln.shape}")
-
-    # Extract numeric radiomics matrix (coerce non-numeric -> NaN, drop fully-NaN cols)
-    X_rad = rad_aln.copy().apply(pd.to_numeric, errors='coerce')
-    X_rad = X_rad.loc[:, ~X_rad.isna().all(axis=0)]
-    print(f"Numeric radiomics features: {X_rad.shape[1]} columns")
-
-    # Note: do not drop `cancer_type` here — keep it available for residualization below
-
-    # Residualize radiomics features by cancer type (if present)
+    # Detect cancer_type-like column before coercing types so we can residualize
     cancer_col = None
-    for c in rad_aln.columns:
+    for c in X_rad.columns:
         if str(c).lower() == 'cancer_type' or re.search(r'cancer[_ ]?type', str(c), re.I):
             cancer_col = c
             break
-    if cancer_col and cancer_col in rad_aln.columns:
+
+    # If cancer_type present, residualize features by cancer type and remove the column
+    if cancer_col is not None:
         print(f"Residualizing radiomics by cancer type column: {cancer_col}")
-        cancer_series = rad_aln[cancer_col].astype(str).astype('category')
+        # Build design matrix of cancer type categories
+        cancer_series = X_rad[cancer_col].astype(str).astype('category')
         dmat = pd.get_dummies(cancer_series, drop_first=True)
+        # Prepare feature matrix (drop cancer column) and coerce to numeric
+        feats_df = X_rad.drop(columns=[cancer_col]).apply(pd.to_numeric, errors='coerce')
+        # Drop fully-NaN columns before regression
+        feats_df = feats_df.loc[:, ~feats_df.isna().all(axis=0)]
         if dmat.shape[1] < 1:
             print('Only one cancer_type level present; skipping residualization')
+            X_rad = feats_df
         else:
+            # Align rows (should match)
+            dmat = dmat.loc[feats_df.index]
             lr = LinearRegression()
-            # align X_rad rows with dmat
-            lr.fit(dmat.values, X_rad.values)
-            preds = lr.predict(dmat.values)
-            residuals = X_rad.values - preds
-            X_rad = pd.DataFrame(residuals, index=X_rad.index, columns=X_rad.columns)
-            res_path = os.path.join(args.outdir, f"{base}_radiomics_residualized_by_cancer_type.csv")
-            X_rad.to_csv(res_path)
-            print(f"Saved residualized radiomics to {res_path}")
+            try:
+                lr.fit(dmat.values, feats_df.values)
+                preds = lr.predict(dmat.values)
+                residuals = feats_df.values - preds
+                X_rad = pd.DataFrame(residuals, index=feats_df.index, columns=feats_df.columns)
+                # Save residualized radiomics for traceability
+                res_path = os.path.join(args.outdir, f"{base}_radiomics_residualized_by_cancer_type.csv")
+                X_rad.to_csv(res_path)
+                print(f"Saved residualized radiomics to {res_path}")
+            except Exception as e:
+                print(f"[warn] Residualization failed: {e}; falling back to numeric coercion without residualization")
+                X_rad = feats_df
     else:
-        print('No cancer_type column found; skipping residualization')
+        # Coerce numeric for radiomics, drop fully-NaN columns
+        X_rad = X_rad.apply(pd.to_numeric, errors='coerce')
+        X_rad = X_rad.loc[:, ~X_rad.isna().all(axis=0)]
 
-    # After residualization, remove the cancer_type column from X_rad if it exists
-    if cancer_col and cancer_col in X_rad.columns:
-        try:
-            X_rad = X_rad.drop(columns=[cancer_col])
-            print(f"Dropped '{cancer_col}' from feature matrix before variance filtering/PCA.")
-        except Exception:
-            # ignore if not present
-            pass
+    # Align samples between matrices (intersection)
+    common = X_rad.index.intersection(geno.index)
+    if common.empty:
+        raise RuntimeError('No overlapping samples between radiomics and genomics matrices')
+    if len(common) < len(X_rad.index):
+        print(f"Warning: dropping {len(X_rad.index) - len(common)} radiomics samples not found in genomics")
+    X_rad = X_rad.loc[common]
+    geno_aln = geno.loc[common]
+    print(f"After alignment: {X_rad.shape[0]} samples")
 
-    # Variance filtering: drop features with variance below 15th percentile
+    # Variance filtering (drop features <= 15th percentile variance)
     feat_vars = X_rad.var(axis=0, ddof=0)
     thresh = np.percentile(feat_vars.values, 15)
     low_var_feats = feat_vars[feat_vars <= thresh].index.tolist()
@@ -348,98 +355,59 @@ def main():
         X_rad = X_rad.drop(columns=low_var_feats)
     print(f"After variance filtering: {X_rad.shape[1]} features remain")
 
-    # Save the aligned matrices after variance filtering
-    aligned_rad_path = os.path.join(args.outdir, f"{base}_radiomics_aligned_filtered.csv")
-    aligned_geno_path = os.path.join(args.outdir, f"{base}_genomics_aligned.csv")
-    X_rad.to_csv(aligned_rad_path)
-    # Save the in-memory aligned genomics (one-to-one with rad_aln) directly
-    gen_aln.to_csv(aligned_geno_path)
-    print(f"Saved aligned radiomics (filtered) to {aligned_rad_path}")
-    print(f"Saved aligned genomics to {aligned_geno_path}")
-
-    # Standardize (z-score) radiomics
+    # Standardize and run PCA on radiomics
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X_rad.values)
-    # Fit PCA and pick components to cover 90% cumulative variance
     pca_full = PCA()
     pca_full.fit(X_scaled)
     cumvar = np.cumsum(pca_full.explained_variance_ratio_)
-    # k for 90% cumvar
-    k90 = int(np.searchsorted(cumvar, 0.90) + 1)
-    print(f"Selected k={k90} components to reach 0.90 cumulative variance")
-
-    # k via elbow method
+    # Determine k using elbow method on cumulative variance
     k_elbow = select_elbow_k(cumvar)
-    print(f"Selected k={k_elbow} components by elbow method")
+    k = int(k_elbow)
+    print(f"Selected k={k} components by elbow method")
 
-    # k for 95% cumvar (user requested marker)
-    k95 = int(np.searchsorted(cumvar, 0.95) + 1)
-    print(f"Selected k={k95} components to reach 0.95 cumulative variance")
+    # Fit final dimensionality reduction with k95 components.
+    # If requested, use SparsePCA (note: explained variance was computed using dense PCA above).
+    if args.sparse_pca:
+        print(f"Using SparsePCA with alpha={args.sparse_alpha} to compute {k} components")
+        spca = SparsePCA(n_components=k, alpha=float(args.sparse_alpha), random_state=int(args.seed))
+        # SparsePCA returns a transformed matrix of shape (n_samples, n_components)
+        X_pca = spca.fit_transform(X_scaled)
+        pca_model = spca
+    else:
+        pca_model = PCA(n_components=k, random_state=int(args.seed))
+        X_pca = pca_model.fit_transform(X_scaled)
+    pc_cols = [f"PC{i+1}" for i in range(k)]
+    X_pca_df = pd.DataFrame(X_pca, index=X_rad.index, columns=pc_cols)
+    pca_out = os.path.join(args.outdir, f"{base}_rad_pca_k{k}.csv")
+    X_pca_df.to_csv(pca_out)
+    print(f"Saved PCA-transformed radiomics to {pca_out}")
 
-    # Save cumulative variance + elbow plot with dotted 95% line
-    try:
-        x = np.arange(1, len(cumvar) + 1)
-        plt.figure(figsize=(8, 5))
-        plt.plot(x, cumvar, marker='o', linestyle='-')
-        # mark elbow point
-        elbow_x = k_elbow
-        elbow_y = cumvar[elbow_x - 1]
-        plt.scatter([elbow_x], [elbow_y], color='red', zorder=5)
-        plt.vlines(elbow_x, ymin=0, ymax=elbow_y, colors='red', linestyles='--')
-        plt.hlines(elbow_y, xmin=1, xmax=elbow_x, colors='red', linestyles='--')
-        # dotted horizontal at 95% and vertical at k95
-        plt.hlines(0.95, xmin=1, xmax=len(cumvar), colors='gray', linestyles=':')
-        plt.vlines(k95, ymin=0, ymax=0.95, colors='gray', linestyles=':')
-        plt.xlabel('Number of components')
-        plt.ylabel('Cumulative explained variance')
-        plt.title('PCA cumulative explained variance with elbow')
-        plt.grid(alpha=0.3)
-        savepath = os.path.join(args.outdir, 'pca_cumulative_variance_elbow.png')
-        plt.tight_layout()
-        plt.savefig(savepath, dpi=300)
-        plt.close()
-        print(f"Saved cumulative variance elbow plot to {savepath}")
-    except Exception as e:
-        print(f"[warning] Could not save elbow plot: {e}")
+    # Compute correlations between PCs (columns of X_pca_df) and genomic signatures (columns of geno_aln)
+    # Ensure geno_aln columns are numeric and aligned
+    geno_aln = geno_aln.apply(pd.to_numeric, errors='coerce')
+    geno_aln = geno_aln.loc[:, ~geno_aln.isna().all(axis=0)]
 
-    # Helper to run PCA, save transformed, and compute correlations
-    def run_pca_and_corr(k, tag):
-        pca = PCA(n_components=k)
-        X_pca = pca.fit_transform(X_scaled)
-        pc_cols = [f"PC{i+1}" for i in range(k)]
-        X_pca_df = pd.DataFrame(X_pca, index=X_rad.index, columns=pc_cols)
-        pca_out = os.path.join(args.outdir, f"rad_pca_{tag}.csv")
-        X_pca_df.to_csv(pca_out)
-        print(f"Saved PCA-transformed radiomics ({tag}) to {pca_out}")
+    # Pearson
+    pcorr, pp = pearson_corr_and_pvals(X_pca_df, geno_aln)
+    pq = benjamini_hochberg(pp)
+    pcorr.to_csv(os.path.join(args.outdir, f"pearson_pca_k{k}.csv"))
+    pp.to_csv(os.path.join(args.outdir, f"pearson_pca_k{k}_pvals.csv"))
+    pq.to_csv(os.path.join(args.outdir, f"pearson_pca_k{k}_q.csv"))
+    plot_heatmap(pcorr, os.path.join(args.outdir, f"pearson_pca_k{k}.png"), cluster=args.cluster)
+    print(f"Saved Pearson correlations (PCs vs genomic signatures)")
 
-        # Use in-memory aligned genomics (gen_aln) — already aligned row-for-row with rad_aln
-        if gen_aln.shape[0] != X_pca_df.shape[0]:
-            raise RuntimeError(f"Aligned genomics rows ({gen_aln.shape[0]}) do not match PCA radiomics rows ({X_pca_df.shape[0]}). Aborting.")
-        geno_for_corr = gen_aln.copy()
-
-        # Pearson
-        pcorr, pp = pearson_corr_and_pvals(X_pca_df, geno_for_corr)
-        pq = benjamini_hochberg(pp)
-        pcorr.to_csv(os.path.join(args.outdir, f"pearson_{tag}.csv"))
-        pp.to_csv(os.path.join(args.outdir, f"pearson_{tag}_pvals.csv"))
-        pq.to_csv(os.path.join(args.outdir, f"pearson_{tag}_q.csv"))
-        plot_heatmap(pcorr, os.path.join(args.outdir, f"pearson_{tag}.png"), cluster=args.cluster)
-        print(f"Saved Pearson ({tag})")
-
-        # Spearman
-        scorr, sp = spearman_corr_and_pvals(X_pca_df, geno_for_corr)
-        sq = benjamini_hochberg(sp)
-        scorr.to_csv(os.path.join(args.outdir, f"spearman_{tag}.csv"))
-        sp.to_csv(os.path.join(args.outdir, f"spearman_{tag}_pvals.csv"))
-        sq.to_csv(os.path.join(args.outdir, f"spearman_{tag}_q.csv"))
-        plot_heatmap(scorr, os.path.join(args.outdir, f"spearman_{tag}.png"), cluster=args.cluster)
-        print(f"Saved Spearman ({tag})")
-
-    # Run for 90%-based components and elbow-based components
-    run_pca_and_corr(k90, '90')
-    run_pca_and_corr(k_elbow, 'elbow')
+    # Spearman
+    scorr, sp = spearman_corr_and_pvals(X_pca_df, geno_aln)
+    sq = benjamini_hochberg(sp)
+    scorr.to_csv(os.path.join(args.outdir, f"spearman_pca_k{k}.csv"))
+    sp.to_csv(os.path.join(args.outdir, f"spearman_pca_k{k}_pvals.csv"))
+    sq.to_csv(os.path.join(args.outdir, f"spearman_pca_k{k}_q.csv"))
+    plot_heatmap(scorr, os.path.join(args.outdir, f"spearman_pca_k{k}.png"), cluster=args.cluster)
+    print(f"Saved Spearman correlations (PCs vs genomic signatures)")
 
     print("Analysis complete.")
+
 
 if __name__=="__main__":
     main()

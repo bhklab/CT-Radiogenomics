@@ -11,6 +11,7 @@
 *.pdf
 *.html
 *.venv
+*.bed9
 # (add uppercase variants if needed)
 *.[Cc][Ss][Vv]
 *.[Tt][Ss][Vv]
