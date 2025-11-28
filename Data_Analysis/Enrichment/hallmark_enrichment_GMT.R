@@ -26,7 +26,6 @@
 # Analysis Method:
 #   - Uses GSVA algorithm for robust single-sample enrichment scoring
 #   - Employs kernel density estimation for score calculation
-#   - Applies log2(TPM + 1) transformation to expression values before GSVA
 #   - Normalizes scores to enable cross-sample comparisons
 #   - Focuses on 50 well-characterized Hallmark pathways
 #
@@ -71,9 +70,6 @@ perform_hallmark_samplewise_fgsea <- function(input_file, gmt_file, output_file)
   
   # Prepare expression matrix for GSVA (genes as rows, samples as columns)
   expr_mat <- as.matrix(expression_data)
-  # Ensure numeric storage and apply log2 transform (TPM + 1) prior to GSVA
-  suppressWarnings(mode(expr_mat) <- "numeric")
-  expr_mat <- log2(expr_mat + 1)
   # Set up GSVA parameters using gsvaParam with expression matrix and gene sets
   gsvaPar <- gsvaParam(expr_mat, filtered_gene_set_list)
   print(gsvaPar)

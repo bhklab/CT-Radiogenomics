@@ -1,18 +1,26 @@
-SAMPLES: KIRC,HNSCC,PDA,CCRCC,NSCLC,OCTANE
+SAMPLES: GBM,BRCA,KIRC,LGG,HNSCC,PDA,CCRCC
 datasets:
   NSCLC: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/NSCLC_filtered_TPM.csv"
   HNSCC: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/HNSCC_filtered_TPM.csv"
   PDA: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/PDA_filtered_TPM.csv"
   CCRCC: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/CCRCC_filtered_TPM.csv"
+  GBM: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/GBM_filtered_TPM.csv"
+  BRCA: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/BRCA_filtered_TPM.csv"
   KIRC: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/KIRC_filtered_TPM.csv"
-  OCTANE: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/OCTANE_filtered_TPM.csv"
+  LGG: "/cluster/projects/bhklab/rawdata/Radiogenomics/TPM_RNAseq_data/LGG_filtered_TPM.csv"
 
 patient_ids:
   NSCLC: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/NSCLC_patientids.txt"
   HNSCC: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/CPTAC_HNSCC_patientids.txt"
   PDA: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/CPTAC_PDA_patientids.txt"
   CCRCC: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/CPTAC_CCRCC_patientids.txt"
+  GBM: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/TCGA_GBM_patientids.txt"
+  BRCA: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/TCGA_BRCA_patientids.txt"
   KIRC: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/TCGA_KIRC_patientids.txt"
-  OCTANE: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/OCTANE_patientids.txt"
+  LGG: "/cluster/projects/bhklab/rawdata/Radiogenomics/sample_ids/TCGA_LGG_patientids.txt"
+
 # Add GMT file paths for each gene set collection
-hallmark_gmt: "/cluster/projects/bhklab/rawdata/Radiogenomics/gmt/h.all.v2025.1.Hs.symbols.gmt"
+hallmark_gmt: "/cluster/projects/bhklab/rawdata/Radiogenomics/gmt/h.all.v2024.1.Hs.symbols.gmt"
+kegg_gmt: "/cluster/projects/bhklab/rawdata/Radiogenomics/gmt/c2.cp.kegg_medicus.v2024.1.Hs.symbols.gmt"
+reactome_gmt: "/cluster/projects/bhklab/rawdata/Radiogenomics/gmt/c2.cp.reactome.v2024.1.Hs.symbols.gmt"
+biocarta_gmt: "/cluster/projects/bhklab/rawdata/Radiogenomics/gmt/c2.cp.biocarta.v2024.1.Hs.symbols.gmt"
